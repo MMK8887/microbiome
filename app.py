@@ -1,33 +1,30 @@
 import streamlit as st
-import pandas as pd, numpy as np, json, os
+import json, os, pandas as pd
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk import pos_tag, ne_chunk
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from datetime import datetime
 
-# === Download NLTK Resources ===
+st.set_page_config(page_title="Gut Health Assistant", page_icon="🦠")
+
+# Download NLTK Resources
 for r, p in {
-    'punkt': 'tokenizers/punkt',
-    'stopwords': 'corpora/stopwords',
+    'punkt': 'tokenizers/punkt', 'stopwords': 'corpora/stopwords',
     'averaged_perceptron_tagger': 'taggers/averaged_perceptron_tagger',
-    'maxent_ne_chunker': 'chunkers/maxent_ne_chunker',
-    'words': 'corpora/words'
+    'maxent_ne_chunker': 'chunkers/maxent_ne_chunker', 'words': 'corpora/words'
 }.items():
-    try: nltk.data.find(p)
-    except LookupError: nltk.download(r)
+    try:
+        nltk.data.find(p)
+    except LookupError:
+        nltk.download(r)
 
-# === NLP Utilities ===
 stop_words = set(stopwords.words("english"))
 
-def extract_keywords(text):
-    tokens = word_tokenize(text)
-    return [w for w, p in pos_tag([w for w in tokens if w.isalnum() and w.lower() not in stop_words]) if p.startswith("NN") or p.startswith("JJ")]
-
-def extract_named_entities(text):
-    return [(" ".join([leaf[0] for leaf in tree.leaves()]), tree.label()) for tree in ne_chunk(pos_tag(word_tokenize(text))) if hasattr(tree, 'label')]
-
+# NLP intent detection
 def detect_intent(text):
     t = text.lower()
     if any(x in t for x in ["gut", "digestion", "microbiome"]): return "gut_health"
@@ -38,30 +35,36 @@ def detect_intent(text):
     if any(x in t for x in ["hello", "hi", "hey"]): return "hello"
     return "unknown"
 
-responses = {
-    "gut_health": "🧬 The gut microbiome supports digestion, immunity, and mental health.",
-    "probiotic_info": "🧫 Probiotics are beneficial microbes found in yogurt, kefir, kimchi, and supplements.",
-    "fiber_info": "🌾 Fiber feeds your good gut bacteria. Eat fruits, veggies, legumes, and oats.",
-    "diversity_info": "🌈 A diverse microbiome is a healthy one. Variety in your diet helps!",
-    "diet_suggestion": "🥗 Eat fermented foods, leafy greens, and avoid excess sugar for gut health.",
-    "hello": "👋 Hello! I'm your gut health assistant.",
-    "unknown": "❓ I'm still learning. Try asking about gut health, probiotics, fiber, or diet."
-}
+# Load data
+@st.cache_data
+def load_microbiome_data():
+    try:
+        df = pd.read_csv("microbiome_data.csv")
+        df["date"] = pd.to_datetime(df["date"], errors='coerce')
+        return df
+    except FileNotFoundError:
+        return pd.DataFrame(columns=["user", "date", "fiber_score", "probiotic_score", "diversity_score", "recommendation"])
 
-def generate_response(intent_obj):
-    if isinstance(intent_obj, dict) and "response" in intent_obj:
-        return intent_obj["response"]
-    intent = intent_obj.get("intent", "unknown")
-    return responses.get(intent, responses["unknown"])
+micro_df = load_microbiome_data()
 
-# === ML Intent Classifier ===
-texts = ["Tell me about probiotics", "digestion problems", "what to eat", "kimchi good", "Shannon index", "hi", "hello"]
-labels = ["probiotic_info", "gut_health", "diet_suggestion", "probiotic_info", "diversity_info", "hello", "hello"]
+# Intent classifier
+training_path = r"C:\Users\HP\Desktop\microbiome\training_data.csv"
+if os.path.exists(training_path):
+    df_train = pd.read_csv(training_path)
+    texts = df_train["text"].tolist()
+    labels = df_train["intent"].tolist()
+else:
+    texts = ["Tell me about probiotics", "digestion problems", "what to eat", "kimchi good", "Shannon index", "hi", "hello"]
+    labels = ["probiotic_info", "gut_health", "diet_suggestion", "probiotic_info", "diversity_info", "hello", "hello"]
+
 vec = TfidfVectorizer()
-clf = LogisticRegression().fit(vec.fit_transform(texts), labels)
-def ml_detect_intent(text): return clf.predict(vec.transform([text]))[0]
+X_train = vec.fit_transform(texts)
+clf = LogisticRegression().fit(X_train, labels)
 
-# === Learnable Intent Store ===
+def ml_detect_intent(text):
+    return clf.predict(vec.transform([text]))[0]
+
+# Learn from feedback
 learn_path = "learned_intents.json"
 learned = json.load(open(learn_path)) if os.path.exists(learn_path) else {}
 
@@ -78,79 +81,150 @@ def update_learning(q, custom_response=None, intent_label=None):
         learned[key] = {"intent": "custom", "response": custom_response}
     elif intent_label:
         learned[key] = {"intent": intent_label}
-    with open(learn_path, "w") as f: json.dump(learned, f, indent=2)
-    st.success(f"✅ Updated intent for '{key}'")
+    with open(learn_path, "w") as f:
+        json.dump(learned, f, indent=2)
 
-# === Microbiome Analysis Utils ===
-normalize_abundance = lambda df: df.div(df.sum(axis=1), axis=0)
-compute_shannon_index = lambda df: -np.sum(df * np.log2(df + 1e-9), axis=1)
-def compute_risk_score(s): return 1 - s
+# Recommendation model
 
-def recommend(df, p):
-    out = []
-    if "Bifidobacterium" in df.columns and df["Bifidobacterium"].mean() < 0.1:
-        out.append("Try non-dairy kimchi or kombucha." if "dairy" in p["allergies"] else "Include yogurt or kefir.")
-    if "Firmicutes" in df.columns and df["Firmicutes"].mean() > 0.4:
-        out.append("Reduce processed sugars.")
-    if p["diet"] == "vegetarian": out.append("Eat lentils, oats, leafy greens.")
-    if "digestion" in p["goal"]: out.append("Add ginger, turmeric to your diet.")
-    return out or ["You're doing great! Keep eating diverse foods."]
+def train_recommendation_model(df):
+    if df.empty or df.shape[0] < 3:
+        return None
+    X = df[["fiber_score", "probiotic_score", "diversity_score"]]
+    y = df["recommendation"]
+    model = DecisionTreeClassifier(max_depth=3)
+    return model.fit(X, y)
 
-# === Streamlit App ===
-st.set_page_config(page_title="Microbiome AI", layout="centered")
-st.title("🧠 Microbiome AI Assistant")
+rec_model = train_recommendation_model(micro_df)
 
-# === Chatbot Section ===
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+latest, recommendation, insights = None, None, []
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# Streamlit UI
+st.title("🤖 Gut Health Assistant")
+st.markdown("Ask me anything about **gut health, probiotics, fiber, diet, or microbiome diversity**.")
 
-if q := st.chat_input("Ask me anything about gut health..."):
-    st.session_state.messages.append({"role": "user", "content": q})
-    with st.chat_message("user"):
-        st.markdown(q)
+user = st.sidebar.text_input("Enter your name", value="Guest")
+uploaded_file = st.sidebar.file_uploader("📄 Upload Microbiome CSV", type="csv")
 
-    intent_obj = learnable_detect(q)
-    if intent_obj["intent"] == "unknown":
-        intent_obj = {"intent": ml_detect_intent(q)}
+if uploaded_file:
+    new_data = pd.read_csv(uploaded_file)
+    if {"fiber_score", "probiotic_score", "diversity_score"}.issubset(new_data.columns):
+        new_data["user"] = user
+        new_data["date"] = pd.to_datetime(datetime.now().strftime("%Y-%m-%d"))
+        micro_df = pd.concat([micro_df, new_data], ignore_index=True)
+        micro_df.to_csv("microbiome_data.csv", index=False)
+        rec_model = train_recommendation_model(micro_df)
+        st.sidebar.success("Data uploaded and saved!")
 
-    response = generate_response(intent_obj)
-    st.session_state.messages.append({"role": "assistant", "content": response})
-    with st.chat_message("assistant"):
-        st.markdown(response)
+        latest = new_data.iloc[-1]
+        X_new = latest[["fiber_score", "probiotic_score", "diversity_score"]].values.reshape(1, -1)
+        recommendation = rec_model.predict(X_new)[0] if rec_model else None
 
-# === Microbiome Data Analysis ===
-st.header("🧪 Microbiome Data Analysis")
+        insights = []
+        if latest["fiber_score"] < 5:
+            insights.append("Low fiber → eat more oats, legumes, fruits.")
+        if latest["probiotic_score"] < 5:
+            insights.append("Low probiotics → try yogurt, kefir, kimchi.")
+        if latest["diversity_score"] < 5:
+            insights.append("Low diversity → eat a variety of vegetables.")
 
-uploaded = st.file_uploader("📂 Upload your microbiome CSV file", type="csv")
+        st.markdown("""
+        ## 🗒️ Report Summary
+        **Date:** {date}  
+        **Recommendation:** 🟢 **{rec}**  
+        **Insights:** {insight_str}  
+        """.format(date=latest['date'].date(), rec=recommendation, insight_str=', '.join(insights) if insights else "✅ All scores look healthy!"))
 
-if uploaded:
-    df = pd.read_csv(uploaded)
-    sample_ids = df["SampleID"] if "SampleID" in df.columns else None
-    if "SampleID" in df.columns: df.drop("SampleID", axis=1, inplace=True)
-    df = df.apply(pd.to_numeric, errors='coerce').fillna(0)
+        st.sidebar.markdown("### 📊 Detailed Report")
+        st.sidebar.metric("Fiber Score", latest["fiber_score"])
+        st.sidebar.metric("Probiotic Score", latest["probiotic_score"])
+        st.sidebar.metric("Diversity Score", latest["diversity_score"])
+        st.sidebar.markdown("**Tips:**")
+        for tip in insights:
+            st.sidebar.markdown(f"- {tip}")
+        chart_df = pd.DataFrame({
+            "Metric": ["Fiber", "Probiotic", "Diversity"],
+            "Score": [latest["fiber_score"], latest["probiotic_score"], latest["diversity_score"]]
+        })
+        st.sidebar.bar_chart(chart_df.set_index("Metric"))
+    else:
+        st.sidebar.error("❗ Uploaded file is missing required columns.")
 
-    df_norm = normalize_abundance(df)
-    df_norm["Shannon_Index"] = compute_shannon_index(df_norm)
-    df_norm["Risk_Score"] = compute_risk_score(df_norm["Shannon_Index"])
-    if sample_ids is not None: df_norm.insert(0, "SampleID", sample_ids)
+def generate_response(intent_obj, user=None):
+    global latest, recommendation, insights
+    responses = {
+        "gut_health": "🧬 The gut microbiome supports digestion, immunity, and mental health.",
+        "probiotic_info": "🧪 Probiotics are beneficial microbes found in yogurt, kefir, kimchi, and supplements.",
+        "fiber_info": "🌾 Fiber feeds your good gut bacteria. Eat fruits, veggies, legumes, and oats.",
+        "diversity_info": "🌈 A diverse microbiome is a healthy one. Variety in your diet helps!",
+        "diet_suggestion": "🥗 Eat fermented foods, leafy greens, and avoid excess sugar for gut health.",
+        "hello": "👋 Hello! I'm your gut health assistant.",
+        "unknown": "❓ I'm still learning. Try asking about gut health, probiotics, fiber, or diet."
+    }
+    if isinstance(intent_obj, dict) and "response" in intent_obj:
+        return intent_obj["response"]
+    intent = intent_obj.get("intent", "unknown")
+    if intent == "diet_suggestion" and user:
+        user_data = micro_df[micro_df["user"] == user]
+        if not user_data.empty:
+            latest = user_data.sort_values("date", ascending=False).iloc[0]
+            insights = []
+            if latest["fiber_score"] < 5:
+                insights.append("low fiber → try oats, fruits, legumes")
+            if latest["probiotic_score"] < 5:
+                insights.append("low probiotics → try yogurt or kimchi")
+            if latest["diversity_score"] < 5:
+                insights.append("low diversity → include a variety of veggies")
+            recommendation = latest["recommendation"]
+            return f"🍽️ Based on your scores: {recommendation}\n\n📌 Suggestions: {', '.join(insights)}\n\n🕒 Report Summary\n**Date:** {latest['date'].date()}\n**Recommendation:** 🟢 **{recommendation}**\n**Insights:** {', '.join(insights) if insights else '✅ All scores look healthy!'}"
+    return responses.get(intent, responses["unknown"])
 
-    st.subheader("📋 Normalized Data")
-    st.dataframe(df_norm.round(4))
+# Chat UI
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "is_unknown" not in st.session_state:
+    st.session_state.is_unknown = False
+if "show_correction_box" not in st.session_state:
+    st.session_state.show_correction_box = False
 
-    st.subheader("📊 Summary Statistics")
-    st.write(df_norm[["Shannon_Index", "Risk_Score"]].describe().round(3))
+user_input = st.chat_input("Type your question here...")
 
-    st.subheader("🌈 Shannon Diversity Index")
-    st.bar_chart(df_norm["Shannon_Index"])
+if user_input:
+    intent_obj = learnable_detect(user_input)
+    st.session_state.is_unknown = intent_obj.get("intent") == "unknown"
+    if st.session_state.is_unknown:
+        intent_obj["intent"] = ml_detect_intent(user_input)
+        update_learning(user_input, intent_label="unknown")
+    bot_reply = generate_response(intent_obj, user)
+    st.session_state.history.append(("You", user_input))
+    st.session_state.history.append(("Bot", bot_reply))
+    st.session_state.show_correction_box = False
 
-    st.subheader("⚠️ Risk Score")
-    st.line_chart(df_norm["Risk_Score"])
+for speaker, msg in st.session_state.history:
+    st.markdown(f"**{speaker}:** {msg}")
 
-    st.subheader("🥗 Dietary Recommendations")
-    profile = {"diet": "vegetarian", "allergies": ["dairy"], "goal": "improve digestion"}
-    for r in recommend(df, profile):
-        st.markdown(f"- {r}")
+if st.session_state.history and st.session_state.history[-1][0] == "Bot":
+    st.markdown("📣 Was this helpful?")
+    col1, col2, _ = st.columns([0.05, 0.05, 0.9])
+    if col1.button("👍"):
+        st.success("Thanks for your feedback!")
+        if st.session_state.is_unknown:
+            update_learning(st.session_state.history[-2][1], intent_label=ml_detect_intent(st.session_state.history[-2][1]))
+    if col2.button("👎"):
+        st.session_state.show_correction_box = True
+
+if st.session_state.show_correction_box:
+    corrected = st.text_input("Suggest a better response:")
+    if corrected:
+        update_learning(st.session_state.history[-2][1], custom_response=corrected)
+        st.success("✅ Got it! I’ll remember that.")
+
+# History & chart
+with st.sidebar.expander("📈 My Full Score History"):
+    user_data = micro_df[micro_df["user"] == user].copy()
+    if not user_data.empty:
+        user_data["date"] = pd.to_datetime(user_data["date"], errors="coerce")
+        user_data = user_data.sort_values("date")
+        st.dataframe(user_data.sort_values("date", ascending=False))
+        st.line_chart(user_data.set_index("date")[['fiber_score', 'probiotic_score', 'diversity_score']])
+    else:
+        st.write("No data available for your profile.")
