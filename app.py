@@ -9,7 +9,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 from datetime import datetime
 
-st.set_page_config(page_title="Gut Health Assistant", page_icon="🦠")
+# App Config
+st.set_page_config(page_title="MIOME (Gut Health Assistant)", page_icon="🤖")
+st.title("🤖 MIOME (Gut Health Assistant)")
+st.markdown("💬 Ask me anything about **🦠 gut health**, **🧪 probiotics**, **🌾 fiber**, **🥗 diet**, or **🧬 microbiome diversity**.")
 
 # Download NLTK Resources
 for r, p in {
@@ -24,7 +27,7 @@ for r, p in {
 
 stop_words = set(stopwords.words("english"))
 
-# NLP intent detection
+# Intent Detection (Rule-based)
 def detect_intent(text):
     t = text.lower()
     if any(x in t for x in ["gut", "digestion", "microbiome"]): return "gut_health"
@@ -33,9 +36,10 @@ def detect_intent(text):
     if any(x in t for x in ["shannon", "diversity", "risk"]): return "diversity_info"
     if any(x in t for x in ["diet", "food", "meal", "eat"]): return "diet_suggestion"
     if any(x in t for x in ["hello", "hi", "hey"]): return "hello"
+    if any(x in t for x in ["what", "do", "help"]): return "help"
     return "unknown"
 
-# Load data
+# Load Microbiome Data
 @st.cache_data
 def load_microbiome_data():
     try:
@@ -47,8 +51,8 @@ def load_microbiome_data():
 
 micro_df = load_microbiome_data()
 
-# Intent classifier
-training_path = r"C:\Users\HP\Desktop\microbiome\training_data.csv"
+# Train intent classifier from training file or fallback
+training_path = "training_data.csv"
 if os.path.exists(training_path):
     df_train = pd.read_csv(training_path)
     texts = df_train["text"].tolist()
@@ -64,7 +68,7 @@ clf = LogisticRegression().fit(X_train, labels)
 def ml_detect_intent(text):
     return clf.predict(vec.transform([text]))[0]
 
-# Learn from feedback
+# Learning from user feedback
 learn_path = "learned_intents.json"
 learned = json.load(open(learn_path)) if os.path.exists(learn_path) else {}
 
@@ -85,7 +89,6 @@ def update_learning(q, custom_response=None, intent_label=None):
         json.dump(learned, f, indent=2)
 
 # Recommendation model
-
 def train_recommendation_model(df):
     if df.empty or df.shape[0] < 3:
         return None
@@ -98,16 +101,21 @@ rec_model = train_recommendation_model(micro_df)
 
 latest, recommendation, insights = None, None, []
 
-# Streamlit UI
-st.title("🤖 Gut Health Assistant")
-st.markdown("Ask me anything about **gut health, probiotics, fiber, diet, or microbiome diversity**.")
-
+# User + Upload Input
 user = st.sidebar.text_input("Enter your name", value="Guest")
-uploaded_file = st.sidebar.file_uploader("📄 Upload Microbiome CSV", type="csv")
+uploaded_file = st.sidebar.file_uploader("📄 Upload Microbiome Data", type=["csv", "xlsx"])
 
 if uploaded_file:
-    new_data = pd.read_csv(uploaded_file)
-    if {"fiber_score", "probiotic_score", "diversity_score"}.issubset(new_data.columns):
+    ext = uploaded_file.name.split(".")[-1].lower()
+    if ext == "csv":
+        new_data = pd.read_csv(uploaded_file)
+    elif ext == "xlsx":
+        new_data = pd.read_excel(uploaded_file)
+    else:
+        st.sidebar.error("Unsupported file type.")
+        new_data = pd.DataFrame()
+
+    if not new_data.empty and {"fiber_score", "probiotic_score", "diversity_score"}.issubset(new_data.columns):
         new_data["user"] = user
         new_data["date"] = pd.to_datetime(datetime.now().strftime("%Y-%m-%d"))
         micro_df = pd.concat([micro_df, new_data], ignore_index=True)
@@ -127,12 +135,12 @@ if uploaded_file:
         if latest["diversity_score"] < 5:
             insights.append("Low diversity → eat a variety of vegetables.")
 
-        st.markdown("""
+        st.markdown(f"""
         ## 🗒️ Report Summary
-        **Date:** {date}  
-        **Recommendation:** 🟢 **{rec}**  
-        **Insights:** {insight_str}  
-        """.format(date=latest['date'].date(), rec=recommendation, insight_str=', '.join(insights) if insights else "✅ All scores look healthy!"))
+        **Date:** {latest['date'].date()}  
+        **Recommendation:** 🟢 **{recommendation}**  
+        **Insights:** {', '.join(insights) if insights else '✅ All scores look healthy!'}
+        """)
 
         st.sidebar.markdown("### 📊 Detailed Report")
         st.sidebar.metric("Fiber Score", latest["fiber_score"])
@@ -141,23 +149,24 @@ if uploaded_file:
         st.sidebar.markdown("**Tips:**")
         for tip in insights:
             st.sidebar.markdown(f"- {tip}")
-        chart_df = pd.DataFrame({
+        st.sidebar.bar_chart(pd.DataFrame({
             "Metric": ["Fiber", "Probiotic", "Diversity"],
             "Score": [latest["fiber_score"], latest["probiotic_score"], latest["diversity_score"]]
-        })
-        st.sidebar.bar_chart(chart_df.set_index("Metric"))
+        }).set_index("Metric"))
     else:
-        st.sidebar.error("❗ Uploaded file is missing required columns.")
+        st.sidebar.error("❗ Uploaded file missing required columns.")
 
+# Response Generator
 def generate_response(intent_obj, user=None):
     global latest, recommendation, insights
     responses = {
         "gut_health": "🧬 The gut microbiome supports digestion, immunity, and mental health.",
         "probiotic_info": "🧪 Probiotics are beneficial microbes found in yogurt, kefir, kimchi, and supplements.",
         "fiber_info": "🌾 Fiber feeds your good gut bacteria. Eat fruits, veggies, legumes, and oats.",
-        "diversity_info": "🌈 A diverse microbiome is a healthy one. Variety in your diet helps!",
+        "diversity_info": "🧫 A diverse microbiome is a healthy one. Variety in your diet helps!",
         "diet_suggestion": "🥗 Eat fermented foods, leafy greens, and avoid excess sugar for gut health.",
         "hello": "👋 Hello! I'm your gut health assistant.",
+        "help": "🧠 You can ask questions about gut health, diet, fiber, and probiotics. 📊 I can also analyze your microbiome data and provide a detailed explanation of your report. 📝",
         "unknown": "❓ I'm still learning. Try asking about gut health, probiotics, fiber, or diet."
     }
     if isinstance(intent_obj, dict) and "response" in intent_obj:
@@ -175,10 +184,17 @@ def generate_response(intent_obj, user=None):
             if latest["diversity_score"] < 5:
                 insights.append("low diversity → include a variety of veggies")
             recommendation = latest["recommendation"]
-            return f"🍽️ Based on your scores: {recommendation}\n\n📌 Suggestions: {', '.join(insights)}\n\n🕒 Report Summary\n**Date:** {latest['date'].date()}\n**Recommendation:** 🟢 **{recommendation}**\n**Insights:** {', '.join(insights) if insights else '✅ All scores look healthy!'}"
+            return f"""🍽️ Based on your scores: {recommendation}
+
+📌 Suggestions: {', '.join(insights)}
+
+🕒 Report Summary  
+**Date:** {latest['date'].date()}  
+**Recommendation:** 🟢 **{recommendation}**  
+**Insights:** {', '.join(insights) if insights else '✅ All scores look healthy!'}"""
     return responses.get(intent, responses["unknown"])
 
-# Chat UI
+# Chat Interface
 if "history" not in st.session_state:
     st.session_state.history = []
 if "is_unknown" not in st.session_state:
@@ -218,7 +234,7 @@ if st.session_state.show_correction_box:
         update_learning(st.session_state.history[-2][1], custom_response=corrected)
         st.success("✅ Got it! I’ll remember that.")
 
-# History & chart
+# History & Trends
 with st.sidebar.expander("📈 My Full Score History"):
     user_data = micro_df[micro_df["user"] == user].copy()
     if not user_data.empty:
