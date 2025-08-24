@@ -1,0 +1,17 @@
+# Core
+streamlit
+pandas
+numpy
+matplotlib
+seaborn
+
+# Machine Learning
+scikit-learn
+
+# NLP (for chatbot intent detection / embeddings)
+sentence-transformers
+torch
+transformers
+
+# Optional (if you handle Excel uploads)
+openpyxl
