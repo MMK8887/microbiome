@@ -17,12 +17,7 @@ SCORE_MIN, SCORE_MAX = 0.0, 10.0
 THRESH_GREEN = 7.0
 THRESH_YELLOW = 5.0
 
-st.set_page_config(
-    page_title="MIOME — Gut Health Assistant", 
-    page_icon="🤖", 
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="MIOME — Gut Health Assistant", page_icon="🤖", layout="centered")
 
 # -------------------------------
 # 2) Helpers (scores, feedback)
@@ -238,104 +233,14 @@ def respond(intent: str, text: str) -> str:
 # -------------------------------
 # 6) UI — Upload
 # -------------------------------
-# Custom CSS for mobile responsiveness
-st.markdown("""
-<style>
-    /* Mobile-first responsive design */
-    @media (max-width: 768px) {
-        .main .block-container {
-            padding-top: 1rem;
-            padding-left: 1rem;
-            padding-right: 1rem;
-            max-width: 100%;
-        }
-        
-        /* Make metrics stack vertically on mobile */
-        .metric-container {
-            margin-bottom: 1rem;
-        }
-        
-        /* Adjust font sizes for mobile */
-        h1 {
-            font-size: 1.5rem !important;
-        }
-        
-        h2 {
-            font-size: 1.2rem !important;
-        }
-        
-        h3 {
-            font-size: 1.1rem !important;
-        }
-        
-        /* Chat messages responsive */
-        .stChatMessage {
-            margin: 0.5rem 0;
-        }
-        
-        /* Sidebar adjustments */
-        .css-1d391kg {
-            width: 100%;
-        }
-        
-        /* File uploader responsive */
-        .stFileUploader {
-            width: 100%;
-        }
-        
-        /* Button adjustments */
-        .stButton button {
-            width: 100%;
-            margin: 0.25rem 0;
-        }
-        
-        /* Text input responsive */
-        .stTextInput input {
-            width: 100% !important;
-        }
-    }
-    
-    /* Tablet adjustments */
-    @media (min-width: 769px) and (max-width: 1024px) {
-        .main .block-container {
-            padding-left: 2rem;
-            padding-right: 2rem;
-        }
-    }
-    
-    /* Hide sidebar on mobile by default */
-    @media (max-width: 768px) {
-        .css-1rs6os.edgvbvh3 {
-            display: none;
-        }
-    }
-</style>
-""", unsafe_allow_html=True)
+st.title("🤖 MIOME")
+st.caption("Your Gut Health Assistant")
 
-# Create a container for better mobile layout
-container = st.container()
-
-with container:
-    st.title("🤖 MIOME")
-    st.caption("Your Gut Health Assistant")
-    
-    # Mobile-friendly upload section
-    st.markdown("### 📥 Upload Your Data")
-    
-    # Use columns for better mobile layout
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        user = st.text_input("👤 Your name (optional)", value=st.session_state.user_name, placeholder="Enter your name").strip() or "Guest"
-        st.session_state.user_name = user
-    
-    with col2:
-        # Mobile sidebar toggle
-        if st.button("ℹ️ Info", help="Toggle info panel"):
-            st.session_state.show_info = not st.session_state.get('show_info', False)
-    
-    # File upload (full width on mobile)
-    uploaded = st.file_uploader("📄 Upload CSV or XLSX", type=["csv", "xlsx"], help="Upload your gut health data file")
+with st.sidebar:
+    st.header("📥 Upload Data")
+    user = st.text_input("👤 Your name (optional)", value=st.session_state.user_name).strip() or "Guest"
+    st.session_state.user_name = user
+    uploaded = st.file_uploader("📄 Upload CSV or XLSX", type=["csv", "xlsx"])
 
 if uploaded:
     try:
@@ -402,143 +307,55 @@ if scores is not None:
     zone = gut_zone(scores["gut_score"])
     zone_color = {"Green": "🟢", "Yellow": "🟡", "Red": "🔴"}
     
-    st.markdown(f"### Hello, {st.session_state.user_name}! 👋")
+    st.subheader(f"Hello, {st.session_state.user_name}!")
+    st.info(f"{zone_color.get(zone, '⚪')} Overall Gut Score: {scores['gut_score']:.1f}/10 — {zone} zone")
     
-    # Overall score - prominent display
-    st.markdown(f"""
-    <div style="
-        background: linear-gradient(90deg, #f0f2f6, #ffffff);
-        padding: 1rem;
-        border-radius: 10px;
-        text-align: center;
-        margin: 1rem 0;
-        border-left: 4px solid {'#28a745' if zone == 'Green' else '#ffc107' if zone == 'Yellow' else '#dc3545'};
-    ">
-        <h2 style="margin: 0; color: #1f2937;">
-            {zone_color.get(zone, '⚪')} Overall Gut Score: {scores['gut_score']:.1f}/10
-        </h2>
-        <p style="margin: 0.5rem 0 0 0; font-size: 1.1rem; color: #6b7280;">
-            <strong>{zone} Zone</strong>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Display metrics - responsive layout
-    st.markdown("#### 📊 Detailed Scores")
-    
-    # Use responsive columns that stack on mobile
-    col1, col2, col3 = st.columns([1, 1, 1])
+    # Display metrics in columns
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        fiber_feedback = feedback(scores['fiber'], "Excellent", "Improving", "Needs work")
+        fiber_feedback = feedback(scores['fiber'], "Good", "Needs attention", "Needs urgent help")
         st.metric("🌾 Fiber Score", f"{scores['fiber']:.1f}/10", delta=fiber_feedback)
     
     with col2:
-        probiotic_feedback = feedback(scores['probiotic'], "Excellent", "Improving", "Needs work")
+        probiotic_feedback = feedback(scores['probiotic'], "Good", "Needs attention", "Needs urgent help")
         st.metric("🦠 Probiotic Score", f"{scores['probiotic']:.1f}/10", delta=probiotic_feedback)
     
     with col3:
-        diversity_feedback = feedback(scores['diversity'], "Excellent", "Improving", "Needs work")
+        diversity_feedback = feedback(scores['diversity'], "Good", "Needs attention", "Needs urgent help")
         st.metric("🥗 Diversity Score", f"{scores['diversity']:.1f}/10", delta=diversity_feedback)
     
     # Show personalized recommendation
-    st.markdown("#### 🎯 Your Personalized Recommendation")
+    st.markdown("**🎯 Personalized Recommendation:**")
     recommendation = rule_based_reco([scores['fiber'], scores['probiotic'], scores['diversity']])
-    
-    # Better mobile formatting for recommendations
-    st.markdown(f"""
-    <div style="
-        background: #e7f3ff;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #007bff;
-        margin: 1rem 0;
-    ">
-        <p style="margin: 0; line-height: 1.6;">{recommendation}</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.success(recommendation)
     
 else:
-    st.markdown("""
-    <div style="
-        text-align: center;
-        padding: 2rem 1rem;
-        background: #f8f9fa;
-        border-radius: 10px;
-        margin: 1rem 0;
-    ">
-        <h3>📂 Get Started</h3>
-        <p>Upload a CSV or XLSX file to see your gut health report and start chatting with MIOME!</p>
-        <p style="font-size: 0.9em; color: #6c757d;">
-            Your file should contain columns: <code>fiber_score</code>, <code>probiotic_score</code>, <code>diversity_score</code>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.info("📂 Upload a CSV or XLSX file to see your gut health report and start chatting!")
+
+st.markdown("---")
 
 # -------------------------------
 # 8) Chatbot Interface
 # -------------------------------
-st.markdown("---")
-st.markdown("### 💬 Chat with MIOME")
+st.subheader("💬 Chat with MIOME")
 
-# Show info panel if toggled
-if st.session_state.get('show_info', False):
-    with st.expander("ℹ️ How to Use MIOME", expanded=True):
-        st.markdown("""
-        **Ask me about:**
-        - 📊 Summary of your scores
-        - 🥗 Diet recommendations
-        - 🌾 Fiber information
-        - 🦠 Probiotic foods
-        - 🎯 Specific improvements
-        
-        **Try asking:**
-        - "How's my diet?"
-        - "What are my scores?"
-        - "How can I improve?"
-        - "Tell me about fiber"
-        """)
+# Display chat history (limit to last 12 messages for performance)
+for who, msg in st.session_state.history[-12:]:
+    with st.chat_message("user" if who == "You" else "assistant"):
+        st.markdown(msg)
 
-# Mobile-optimized chat container
-chat_container = st.container()
-
-with chat_container:
-    # Display chat history (limit to last 10 messages for mobile performance)
-    max_messages = 10 if st.session_state.get('mobile_view', True) else 12
-    
-    for who, msg in st.session_state.history[-max_messages:]:
-        with st.chat_message("user" if who == "You" else "assistant"):
-            # Better mobile formatting for long messages
-            if len(msg) > 200:
-                st.markdown(msg[:200] + "...")
-                with st.expander("Show full message"):
-                    st.markdown(msg)
-            else:
-                st.markdown(msg)
-
-# Chat input with mobile-friendly placeholder
-user_msg = st.chat_input(
-    "💬 Ask about your gut health...", 
-    max_chars=500,
-    key="chat_input"
-)
+# Chat input
+user_msg = st.chat_input("Ask about summary, diet, fiber, probiotics, diversity, or improvements…")
 
 if user_msg:
-    # Show typing indicator for better UX
-    with st.spinner("MIOME is thinking..."):
-        # Predict intent and generate response
-        intent = predict_intent(user_msg)
-        answer = respond(intent, user_msg)
-        
-        # Add to history
-        st.session_state.history.append(("You", user_msg))
-        st.session_state.history.append(("Bot", answer))
-        
-        # Rerun to show new messages
-        st.rerun()
-
-# Add session state initialization for mobile features
-if "show_info" not in st.session_state:
-    st.session_state.show_info = False
-if "mobile_view" not in st.session_state:
-    st.session_state.mobile_view = True
+    # Predict intent and generate response
+    intent = predict_intent(user_msg)
+    answer = respond(intent, user_msg)
+    
+    # Add to history
+    st.session_state.history.append(("You", user_msg))
+    st.session_state.history.append(("Bot", answer))
+    
+    # Rerun to show new messages
+    st.rerun()
